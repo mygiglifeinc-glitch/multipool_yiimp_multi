@@ -106,15 +106,11 @@ EOF
 # Uses YiiMPRepo/YiiMPBranch from .yiimp.conf (set from the YIIMP_REPO and
 # YIIMP_BRANCH environment variables when the questions were answered).
 function mp_clone_yiimp {
-	local repo=${YiiMPRepo:-https://github.com/cryptopool-builders/yiimp.git}
+	local repo=${YiiMPRepo:-${MULTIPOOL_GITHUB:-https://github.com/mygiglifeinc-glitch}/yiimp.git}
 	local branch=${YiiMPBranch:-}
 	local dest="$STORAGE_ROOT/yiimp/yiimp_setup/yiimp"
 
-	if [ -z "$branch" ] && is_yes "${CoinPort:-no}"; then
-		branch=multi-port
-	fi
-
-	echo -e " Downloading CryptoPool.builders YiiMP Repo...$COL_RESET"
+	echo -e " Downloading YiiMP Repo...$COL_RESET"
 	sudo mkdir -p "$STORAGE_ROOT/yiimp/yiimp_setup"
 	sudo rm -rf "$dest"
 	if [ -n "$branch" ]; then
