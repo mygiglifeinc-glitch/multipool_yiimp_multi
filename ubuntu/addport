@@ -1,176 +1,123 @@
 #!/usr/bin/env bash
-
-source /etc/functions.sh
-source /etc/multipool.conf
-source $STORAGE_ROOT/yiimp/.yiimp.conf
 #####################################################
 # Dedicated Port config generator
 # Created by cryptopool.builders for multipool
 # This generator will modify the main algo.conf file
 # Create the new coin.algo.conf file
 # And update the stratum start file
+#
+#   addport            add the port on this stratum server
+#   addport --multi    also add it on the stratum servers listed in
+#                      $STORAGE_ROOT/yiimp/.remote_stratums.conf
+#                      (installed as addport_multi)
 #####################################################
+
+source /etc/functions.sh
+source /etc/multipool.conf
+
+multi=false
+if [ "${1:-}" = "--multi" ]; then
+	multi=true
+fi
+
+config_dir="$STORAGE_ROOT/yiimp/site/stratum/config"
+remote_script="$STORAGE_ROOT/yiimp/remote.sh"
+remote_list="$STORAGE_ROOT/yiimp/.remote_stratums.conf"
 
 clear
 
-# Generate random open PORT
-function EPHYMERAL_PORT(){
-    LPORT=2768;
-    UPORT=6999;
-    while true; do
-        MPORT=$[$LPORT + ($RANDOM % $UPORT)];
-        (echo "" >/dev/tcp/127.0.0.1/${MPORT}) >/dev/null 2>&1
-        if [ $? -ne 0 ]; then
-            echo $MPORT;
-            return 0;
-        fi
-    done
+# Pick a random port between 2768 and 6999 that nothing listens on yet.
+function ephemeral_port {
+	local port
+	while true; do
+		port=$((2768 + RANDOM % (6999 - 2768 + 1)))
+		if ! ss -Hltn "sport = :${port}" | grep -q .; then
+			echo "$port"
+			return 0
+		fi
+	done
 }
 
-coinport=$(EPHYMERAL_PORT)
-
-cd /home/crypto-data/yiimp/site/stratum/config
+cd "$config_dir" || exit 1
 echo "Thanks for using the addport script by cryptopool.builders."
 echo
 echo "addport will randomly selects an open port for the coin between ports 2768 and 6999 and open the port in UFW."
-echo "It will also create a new symbol.algo.conf in /home/crypto-data/yiimp/site/stratum/config"
+echo "It will also create a new symbol.algo.conf in $config_dir"
 echo "and will create a new stratum.symbol run file in /usr/bin."
 echo
 
 echo
 echo -e "$RED Make sure coin symbol is all UPPER case.$COL_RESET"
-read -e -p "Please enter the coin SYMBOL : " coinsymbol
+coinsymbol=
+while ! [[ "$coinsymbol" =~ ^[A-Za-z0-9]+$ ]]; do
+	read -r -e -p "Please enter the coin SYMBOL : " coinsymbol
+done
 echo ""
 echo -e "$RED Make sure algo is in all lower case and a valid algo in yiimp.$COL_RESET"
-read -e -p "Please enter the coin algo : " coinalgo
+coinalgo=
+while ! [[ "$coinalgo" =~ ^[A-Za-z0-9]+$ ]]; do
+	read -r -e -p "Please enter the coin algo : " coinalgo
+done
 echo ""
-read -e -p "Would you like to set a minimum nicehash value for this stratum? (y/n) : " nicehash
-if [[ ("$nicehash" == "y" || "$nicehash" == "Y" || "$nicehash" == "yes" || "$nicehash" == "YES") ]]; then
-read -e -p "Please enter a whole value, example: 750000 : " nicevalue
+nicevalue=
+read -r -e -p "Would you like to set a minimum nicehash value for this stratum? (y/n) : " nicehash
+if [[ "${nicehash,,}" == "y" || "${nicehash,,}" == "yes" ]]; then
+	while ! [[ "$nicevalue" =~ ^[0-9]+$ ]]; do
+		read -r -e -p "Please enter a whole value, example: 750000 : " nicevalue
+	done
 fi
-# Make the coin symbol lower case
-coinsymbollower=${coinsymbol,,}
 # make sure algo is lower as well since we are Here
 coinalgo=${coinalgo,,}
 # and might as well make sure the symbol is upper case
 coinsymbol=${coinsymbol^^}
+# Make the coin symbol lower case
+coinsymbollower=${coinsymbol,,}
 
-# Make sure the stratum.symbol config doesnt exist and that the algo file does.
-if [ -f $STORAGE_ROOT/yiimp/site/stratum/config/stratum.${coinsymbollower} ]; then
-  read -r -e -p "A file for ${coinsymbol} already exists. Are you sure you want to overwrite? A new port will be generated and you will need to update your coind.conf blocknotify line (y/n) : " overwrite
-  if [[ ("$overwrite" == "n" || "$overwrite" == "N" || "$overwrite" == "no" || "$overwrite" == "NO") ]]; then
-    echo -e "Later gator..."
-    exit 0
-  fi
-if [ ! -f /home/crypto-data/yiimp/site/stratum/config/$coinalgo.conf ]; then
-  echo -e "Sorry that algo config file doesn't exist in /home/crypto-data/yiimp/site/stratum/config/ please double check and try again."
-  exit 0
-fi
+# Make sure the algo file exists.
+if [ ! -f "$config_dir/$coinalgo.conf" ]; then
+	echo -e "Sorry that algo config file doesn't exist in $config_dir please double check and try again."
+	exit 0
 fi
 
-# Prevent duplications from people running addport multiple times for the same coin...Also known as asshats...
-if [ -f $STORAGE_ROOT/yiimp/site/stratum/config/$coinsymbollower.$coinalgo.conf ]; then
-  if [[ ("$overwrite" == "y" || "$overwrite" == "Y" || "$overwrite" == "yes" || "$overwrite" == "YES") ]]; then
-    # Insert the port in to the new symbol.algo.conf
-    sed -i '/port/c\port = '${coinport}'' $coinsymbollower.$coinalgo.conf
-    echo -e "Port updated! Remeber to update your blocknotify line!!"
-  fi
-else
-# Since this is a new symbol we are going to add it to the other conf files first.
-# First we need to check if this is the first time addport has been ran
-files=(*.$coinalgo.conf)
-if [ -e "${files[0]}" ]; then
-for r in *.$coinalgo.conf; do
-  if ! grep -Fxq "exclude = ${coinsymbol}" "$r"; then
-    sed -i -e '$a\
-[WALLETS]\
-exclude = '${coinsymbol}'' "$r"
-fi
-done
-fi
-# Copy the default algo.conf to the new symbol.algo.conf
-  cp -r $coinalgo.conf $coinsymbollower.$coinalgo.conf
-# Insert the port in to the new symbol.algo.conf
-  sed -i '/port/c\port = '${coinport}'' $coinsymbollower.$coinalgo.conf
-# If setting a nicehash value
-if [[ ("$nicehash" == "y" || "$nicehash" == "Y" || "$nicehash" == "yes" || "$nicehash" == "YES") ]]; then
-  sed -i -e '/difficulty =/a\
-nicehash = '${nicevalue}'' $coinsymbollower.$coinalgo.conf
-fi
-# Insert the include in to the new symbol.algo.conf
-  sed -i -e '$a\
-[WALLETS]\
-include = '${coinsymbol}'' $coinsymbollower.$coinalgo.conf
+# Make sure the stratum.symbol config doesnt exist.
+if [ -f "$config_dir/stratum.${coinsymbollower}" ]; then
+	read -r -e -p "A file for ${coinsymbol} already exists. Are you sure you want to overwrite? A new port will be generated and you will need to update your coind.conf blocknotify line (y/n) : " overwrite
+	if [[ "${overwrite,,}" != "y" && "${overwrite,,}" != "yes" ]]; then
+		echo -e "Later gator..."
+		exit 0
+	fi
 fi
 
-#Again preventing asshat duplications...
-if ! grep -Fxq "exclude = ${coinsymbol}" "$coinalgo.conf"; then
-# Insert the exclude in to algo.conf
-  sed -i -e '$a\
-[WALLETS]\
-exclude = '${coinsymbol}'' $coinalgo.conf
-else
-  echo -e "${coinsymbol} is already in $coinalgo.conf, skipping... Which means you are trying to run this multiple times for the same coin."
+coinport=$(ephemeral_port)
+args=("$coinsymbol" "$coinalgo" "$coinport")
+if [ -n "$nicevalue" ]; then
+	args+=("$nicevalue")
 fi
 
-# New coin stratum start file
-
-echo '#####################################################
-# Source code from https://codereview.stackexchange.com/questions/55077/small-bash-script-to-sta$
-# Updated by cryptopool.builders for crypto use...
-#####################################################
-
-source /etc/multipool.conf
-source $STORAGE_ROOT/yiimp/.yiimp.conf
-STRATUM_DIR=$STORAGE_ROOT/yiimp/site/stratum
-LOG_DIR=$STORAGE_ROOT/yiimp/site/log
-#!/usr/bin/env bash
-
-'""''"${coinsymbollower}"''""'="screen -dmS '""''"${coinsymbollower}"''""' bash $STRATUM_DIR/run.sh '""''"${coinsymbollower}"''""'.'""''"${coinalgo}"''""'"
-'""''"${coinsymbollower}"''""'stop="'screen -X -S ${coinsymbollower} quit'"
-
-startstop_'""''"${coinsymbollower}"''""'() {
-    cmd=$1
-    case $cmd in
-        stop) $'""''"${coinsymbollower}"''""'stop ;;
-        start) $'""''"${coinsymbollower}"''""' ;;
-        restart)
-            $'""''"${coinsymbollower}"''""'stop
-            sleep 1
-            $'""''"${coinsymbollower}"''""'
-            ;;
-    esac
-}
-
-case "$1" in
-    start|stop|restart) cmd=$1 ;;
-    *)
-        shift
-        servicenames=${@-servicenames}
-        echo "usage: $0 [start|stop|restart] algo"
-        exit 1
-esac
-
-
-shift
-
-for name; do
-    case "$name" in
-    '""''"${coinsymbollower}"''""') startstop_'""''"${coinsymbollower}"''""' $cmd ;;
-    *) startstop_service $cmd $name ;;
-    esac
-done ' | sudo -E tee $STORAGE_ROOT/yiimp/site/stratum/config/stratum.${coinsymbollower} >/dev/null 2>&1
-sudo chmod +x $STORAGE_ROOT/yiimp/site/stratum/config/stratum.${coinsymbollower}
-
-sudo cp -r stratum.${coinsymbollower} /usr/bin
-sudo ufw allow $coinport
-echo
-echo "Adding stratum.${coinsymbollower} to crontab for autostart at system boot."
-(crontab -l 2>/dev/null; echo "@reboot sleep 10 && bash stratum.${coinsymbollower} start ${coinsymbollower}") | crontab -
 echo
 echo -e "$YELLOW Starting your new stratum...$COL_RESET"
-bash stratum.${coinsymbollower} start ${coinsymbollower}
+bash "$remote_script" "${args[@]}" || exit 1
 echo -e "$GREEN Your new stratum is started...Do NOT run the start command manually...$COL_RESET"
+
+if [ "$multi" = true ]; then
+	echo "Adding port and config files to remote stratums, script will seem to hang for a few minutes..."
+	if [ ! -f "$remote_list" ]; then
+		echo -e "$RED No remote stratum servers configured.$COL_RESET"
+		echo "List them in $remote_list, one user@private_ip per line, then run addport_multi again."
+	else
+		while read -r server _; do
+			[[ -z "$server" || "$server" == \#* ]] && continue
+			echo -e "$YELLOW Updating ${server}...$COL_RESET"
+			# You are asked for the password of each server unless you use SSH keys.
+			# shellcheck disable=SC2029
+			if ! ssh -o StrictHostKeyChecking=accept-new "$server" "bash -s -- $(printf '%q ' "${args[@]}")" < "$remote_script"; then
+				echo -e "$RED Updating ${server} failed.$COL_RESET"
+			fi
+		done < <(grep -v '^[[:space:]]*$' "$remote_list")
+		echo "Addport is completed and all stratums have been updated and the stratums have been started."
+	fi
+fi
+
 echo
 echo -e "To use your new stratum type,$BLUE stratum.${coinsymbollower} start|stop|restart ${coinsymbollower} $COL_RESET"
 echo
@@ -179,6 +126,9 @@ echo
 echo -e "The assigned dedicated port for this coins stratum is :$YELLOW $coinport $COL_RESET"
 echo
 echo "Make sure to add this to the Dedicated Port section in your YiiMP admin area!"
+echo "You must update your coin.conf on your DAEMON server(s) for blocknotify to use this new port : $coinport"
+echo "If you do not update this you will get blocknotify errors!"
+echo
 
 echo "Donations for continued support of this script are welcomed at:"
 echo
@@ -187,5 +137,5 @@ echo "BCH qrf2fhk2pfka5k649826z4683tuqehaq2sc65nfz3e"
 echo "ETH 0x6A047e5410f433FDBF32D7fb118B6246E3b7C136"
 echo "LTC MLS5pfgb7QMqBm3pmBvuJ7eRCRgwLV25Nz"
 
-cd ~
+cd ~ || exit 0
 exit 0

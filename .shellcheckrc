@@ -1,4 +1,6 @@
 external-sources=true
-# Scripts source /etc/functions.sh, /etc/multipool.conf and generated config
-# files that only exist on an installed system.
-disable=SC1090,SC1091
+# Scripts source /etc/functions.sh, /etc/multipool.conf and the generated
+# .yiimp.conf (which only exist on an installed system) and share variables
+# across sourced files, so "unused" (SC2034) and "referenced but not
+# assigned" (SC2154) are expected.
+disable=SC1090,SC1091,SC2034,SC2154
