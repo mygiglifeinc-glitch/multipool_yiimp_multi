@@ -1,95 +1,87 @@
 #!/usr/bin/env bash
-
 #####################################################
 # Source https://mailinabox.email/ https://github.com/mail-in-a-box/mailinabox
 # Updated by cryptopool.builders for crypto use...
 #####################################################
 
+MP_STAGE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source /etc/functions.sh
 source /etc/multipool.conf
-source $STORAGE_ROOT/yiimp/.yiimp.conf
+source "$STORAGE_ROOT/yiimp/.yiimp.conf"
+source "$MP_STAGE/system_base.sh"
+source "$MP_STAGE/nginx_site.sh"
+PHP_VERSION="${PHP_VERSION:-$MULTIPOOL_DEFAULT_PHP_VERSION}"
 
 echo -e " Building web file structure and copying files...$COL_RESET"
 
-sudo mkdir -p $STORAGE_ROOT/yiimp/site/web
-sudo mkdir -p $STORAGE_ROOT/yiimp/site/configuration
-sudo mkdir -p $STORAGE_ROOT/yiimp/site/crons
-sudo mkdir -p $STORAGE_ROOT/yiimp/site/log
-sudo mkdir -p $STORAGE_ROOT/yiimp/starts
+site="$STORAGE_ROOT/yiimp/site"
+src="$STORAGE_ROOT/yiimp/yiimp_setup/yiimp"
+sudo mkdir -p "$site/web" "$site/configuration" "$site/crons" "$site/log" "$site/backup" \
+	"$STORAGE_ROOT/yiimp/starts" "/var/www/${DomainName}/html" /etc/yiimp
 
-cd $STORAGE_ROOT/yiimp/yiimp_setup/yiimp
-sudo sed -i 's/AdminRights/'${AdminPanel}'/' $STORAGE_ROOT/yiimp/yiimp_setup/yiimp/web/yaamp/modules/site/SiteController.php
-sudo cp -r $STORAGE_ROOT/yiimp/yiimp_setup/yiimp/web $STORAGE_ROOT/yiimp/site/
-cd $STORAGE_ROOT/yiimp/yiimp_setup/
-sudo cp -r $STORAGE_ROOT/yiimp/yiimp_setup/yiimp/bin/. /bin/
-sudo mkdir -p /var/www/${DomainName}/html
-sudo mkdir -p /etc/yiimp
-sudo mkdir -p $STORAGE_ROOT/yiimp/site/backup/
-sudo sed -i "s|ROOTDIR=/data/yiimp|ROOTDIR=${STORAGE_ROOT}/yiimp/site|g" /bin/yiimp
+sudo sed -i "s|AdminRights|$(sed_escape "$AdminPanel")|" "$src/web/yaamp/modules/site/SiteController.php"
+sudo cp -r "$src/web" "$site/"
+sudo cp -r "$src/bin/." /bin/
+sudo sed -i "s|ROOTDIR=/data/yiimp|ROOTDIR=$(sed_escape "${STORAGE_ROOT}/yiimp/site")|g" /bin/yiimp
 echo -e "$GREEN Done...$COL_RESET"
 
 echo -e " Creating nginx web configuration files...$COL_RESET"
-if [[ ("$UsingSubDomain" == "y" || "$UsingSubDomain" == "Y" || "$UsingSubDomain" == "yes" || "$UsingSubDomain" == "Yes" || "$UsingSubDomain" == "YES") ]]; then
-  source /tmp/nginx_subdomain_nonssl.sh;
-    if [[ ("$InstallSSL" == "y" || "$InstallSSL" == "Y" || "$InstallSSL" == "yes" || "$InstallSSL" == "Yes" || "$InstallSSL" == "YES") ]]; then
-      source /tmp/nginx_subdomain_ssl.sh;
-    fi
-      else
-        source /tmp/nginx_domain_nonssl.sh;
-    if [[ ("$InstallSSL" == "y" || "$InstallSSL" == "Y" || "$InstallSSL" == "yes" || "$InstallSSL" == "Yes" || "$InstallSSL" == "YES") ]]; then
-      source /tmp/nginx_domain_ssl.sh;
-    fi
+mp_nginx_site self || exit 1
+if is_yes "$InstallSSL"; then
+	if mp_certbot; then
+		mp_nginx_site letsencrypt || exit 1
+	fi
 fi
 echo -e "$GREEN Done...$COL_RESET"
 
 echo -e " Creating YiiMP configuration files...$COL_RESET"
-sudo chmod u+x /tmp/keys.sh;
-source /tmp/keys.sh;
-sudo chmod u+x /tmp/yiimpserverconfig.sh;
-source /tmp/yiimpserverconfig.sh;
-sudo chmod u+x /tmp/main.sh;
-source /tmp/main.sh;
-sudo chmod u+x /tmp/loop2.sh;
-source /tmp/loop2.sh;
-sudo chmod u+x /tmp/blocks.sh;
-source /tmp/blocks.sh;
+source "$MP_STAGE/keys.sh"
+source "$MP_STAGE/yiimpserverconfig.sh"
+source "$MP_STAGE/main.sh"
+source "$MP_STAGE/loop2.sh"
+source "$MP_STAGE/blocks.sh"
 echo -e "$GREEN Done...$COL_RESET"
 
 echo -e " Setting correct folder permissions...$COL_RESET"
-whoami=`whoami`
-sudo usermod -aG www-data $whoami
-sudo usermod -a -G www-data $whoami
-sudo usermod -a -G crypto-data $whoami
-sudo usermod -a -G crypto-data www-data
-sudo find $STORAGE_ROOT/yiimp/site/ -type d -exec chmod 775 {} +
-sudo find $STORAGE_ROOT/yiimp/site/ -type f -exec chmod 664 {} +
-sudo chgrp www-data $STORAGE_ROOT -R
-sudo chmod g+w $STORAGE_ROOT -R
+whoami=$(whoami)
+sudo usermod -aG www-data "$whoami"
+sudo usermod -aG "$STORAGE_USER" "$whoami"
+sudo usermod -aG "$STORAGE_USER" www-data
+# The web tree is shared by the installing user (cron screens) and php-fpm
+# (www-data); files are not writable by anybody else.
+sudo chgrp -R www-data "$site"
+sudo find "$site" -type d -exec chmod 2775 {} +
+sudo find "$site" -type f -exec chmod 664 {} +
+sudo chmod +x "$site"/crons/*.sh
+# The log directory must stay writable for both no matter the umask.
+sudo setfacl -R -m g:www-data:rwX -m d:g:www-data:rwX "$site/log"
+# Secrets: serverconfig.php is readable by root and www-data only.
+sudo chown root:www-data "$site/configuration/serverconfig.php"
+sudo chmod 0640 "$site/configuration/serverconfig.php"
 echo -e "$GREEN Done...$COL_RESET"
 
-#Updating YiiMP files for cryptopool.builders build
-#Set Insternal IP to .0/26
-internalrpcip=$WebInternalIP
-internalrpcip="${WebInternalIP::-1}"
-internalrpcip="${internalrpcip::-1}"
-internalrpcip=$internalrpcip.0/26
+# Updating YiiMP files for cryptopool.builders build
+# Allow coin daemon RPC from the /26 network the web server is in.
+last_octet=${WebInternalIP##*.}
+internalrpcip="${WebInternalIP%.*}.$((last_octet & 192))/26"
 
 echo -e " Adding the cryptopool.builders flare to YiiMP...$COL_RESET"
-sudo sed -i 's/YII MINING POOLS/'${DomainName}' Mining Pool/g' $STORAGE_ROOT/yiimp/site/web/yaamp/modules/site/index.php
-sudo sed -i 's/domain/'${DomainName}'/g' $STORAGE_ROOT/yiimp/site/web/yaamp/modules/site/index.php
-sudo sed -i 's/Notes/AddNodes/g' $STORAGE_ROOT/yiimp/site/web/yaamp/models/db_coinsModel.php
-sudo sed -i "s|serverconfig.php|${STORAGE_ROOT}/yiimp/site/configuration/serverconfig.php|g" $STORAGE_ROOT/yiimp/site/web/index.php
-sudo sed -i "s|serverconfig.php|${STORAGE_ROOT}/yiimp/site/configuration/serverconfig.php|g" $STORAGE_ROOT/yiimp/site/web/runconsole.php
-sudo sed -i "s|serverconfig.php|${STORAGE_ROOT}/yiimp/site/configuration/serverconfig.php|g" $STORAGE_ROOT/yiimp/site/web/run.php
-sudo sed -i "s|serverconfig.php|${STORAGE_ROOT}/yiimp/site/configuration/serverconfig.php|g" $STORAGE_ROOT/yiimp/site/web/yaamp/yiic.php
-sudo sed -i "s|serverconfig.php|${STORAGE_ROOT}/yiimp/site/configuration/serverconfig.php|g" $STORAGE_ROOT/yiimp/site/web/yaamp/modules/thread/CronjobController.php
+domain_sed=$(sed_escape "$DomainName")
+sudo sed -i "s|YII MINING POOLS|${domain_sed} Mining Pool|g" "$site/web/yaamp/modules/site/index.php"
+sudo sed -i "s|domain|${domain_sed}|g" "$site/web/yaamp/modules/site/index.php"
+sudo sed -i 's/Notes/AddNodes/g' "$site/web/yaamp/models/db_coinsModel.php"
+serverconfig_sed=$(sed_escape "${site}/configuration/serverconfig.php")
+for f in web/index.php web/runconsole.php web/run.php web/yaamp/yiic.php web/yaamp/modules/thread/CronjobController.php; do
+	sudo sed -i "s|serverconfig.php|${serverconfig_sed}|g" "$site/$f"
+done
 
-sudo sed -i '/# onlynet=ipv4/i\    echo "rpcallowip='${internalrpcip}'\\n";\n' $STORAGE_ROOT/yiimp/site/web/yaamp/modules/site/coin_form.php
-sudo sed -i 's/internalipsed/'${DaemonInternalIP}'/g' $STORAGE_ROOT/yiimp/site/web/yaamp/modules/site/coin_form.php
+sudo sed -i "/# onlynet=ipv4/i\\    echo \"rpcallowip=${internalrpcip}\\\\n\";\\n" "$site/web/yaamp/modules/site/coin_form.php"
+sudo sed -i "s|internalipsed|$(sed_escape "$DaemonInternalIP")|g" "$site/web/yaamp/modules/site/coin_form.php"
 
-sudo sed -i "s|/root/backup|${STORAGE_ROOT}/yiimp/site/backup|g" $STORAGE_ROOT/yiimp/site/web/yaamp/core/backend/system.php
-sudo sed -i 's/service $webserver start/sudo service $webserver start/g' $STORAGE_ROOT/yiimp/site/web/yaamp/modules/thread/CronjobController.php
-sudo sed -i 's/service nginx stop/sudo service nginx stop/g' $STORAGE_ROOT/yiimp/site/web/yaamp/modules/thread/CronjobController.php
+sudo sed -i "s|/root/backup|$(sed_escape "$site/backup")|g" "$site/web/yaamp/core/backend/system.php"
+# shellcheck disable=SC2016
+sudo sed -i 's/service $webserver start/sudo service $webserver start/g' "$site/web/yaamp/modules/thread/CronjobController.php"
+sudo sed -i 's/service nginx stop/sudo service nginx stop/g' "$site/web/yaamp/modules/thread/CronjobController.php"
 
 echo -e "$GREEN Web structure completed...$COL_RESET"
 exit 0

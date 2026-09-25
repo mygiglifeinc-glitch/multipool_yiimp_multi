@@ -22,7 +22,10 @@
 # NAME VAL
 #   UE
 
-import sys, re
+import os
+import re
+import sys
+import tempfile
 
 # sanity check
 if len(sys.argv) < 3:
@@ -38,7 +41,7 @@ delimiter_re = r"\s*=\s*"
 comment_char = "#"
 folded_lines = False
 testing = False
-while settings[0][0] == "-" and settings[0] != "--":
+while settings and settings[0][0] == "-" and settings[0] != "--":
 	opt = settings.pop(0)
 	if opt == "-s":
 		# Space is the delimiter
@@ -58,24 +61,24 @@ while settings[0][0] == "-" and settings[0] != "--":
 
 # sanity check command line
 for setting in settings:
-	try:
-		name, value = setting.split("=", 1)
-	except:
+	if "=" not in setting:
 		import subprocess
 		print("Invalid command line: ", subprocess.list2cmdline(sys.argv))
+		sys.exit(1)
 
 # create the new config file in memory
 
 found = set()
 buf = ""
-input_lines = list(open(filename))
+with open(filename) as f:
+	input_lines = list(f)
 
 while len(input_lines) > 0:
 	line = input_lines.pop(0)
 
 	# If this configuration file uses folded lines, append any folded lines
 	# into our input buffer.
-	if folded_lines and line[0] not in (comment_char, " ", ""):
+	if folded_lines and line[:1] not in (comment_char, " ", ""):
 		while len(input_lines) > 0 and input_lines[0][0] in " \t":
 			line += input_lines.pop(0)
 
@@ -84,9 +87,9 @@ while len(input_lines) > 0:
 		# Check that this line contain this setting from the command-line arguments.
 		name, val = settings[i].split("=", 1)
 		m = re.match(
-			   "(\s*)"
-			 + "(" + re.escape(comment_char) + "\s*)?"
-			 + re.escape(name) + delimiter_re + "(.*?)\s*$",
+			   r"(\s*)"
+			 + "(" + re.escape(comment_char) + r"\s*)?"
+			 + re.escape(name) + delimiter_re + r"(.*?)\s*$",
 			 line, re.S)
 		if not m: continue
 		indent, is_comment, existing_val = m.groups()
@@ -129,9 +132,22 @@ for i in range(len(settings)):
 		buf += name + delimiter + val + "\n"
 
 if not testing:
-	# Write out the new file.
-	with open(filename, "w") as f:
-		f.write(buf)
+	# Write out the new file atomically, keeping the original's permissions
+	# and ownership so we never widen access to a config file.
+	st = os.stat(filename)
+	fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(filename)))
+	try:
+		with os.fdopen(fd, "w") as f:
+			f.write(buf)
+		os.chmod(tmp, st.st_mode & 0o7777)
+		try:
+			os.chown(tmp, st.st_uid, st.st_gid)
+		except PermissionError:
+			pass
+		os.replace(tmp, filename)
+	except BaseException:
+		os.unlink(tmp)
+		raise
 else:
 	# Just print the new file to stdout.
 	print(buf)

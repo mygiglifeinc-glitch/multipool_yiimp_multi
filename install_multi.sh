@@ -1,14 +1,11 @@
+#!/usr/bin/env bash
 #####################################################
 # Created by cryptopool.builders for crypto use...
 #####################################################
 
 source /etc/multipool.conf
 
-if [ -d "$HOME/multipool/yiimp_multi" ]; then
-  cd $HOME/multipool/yiimp_multi
-else
-  cd $HOME
-fi
+cd "$HOME/multipool/yiimp_multi" || exit 1
 
 # Begin Installation
 source questions_multi.sh
@@ -21,8 +18,4 @@ source setsid_stratum_server.sh
 source setsid_daemon_server.sh
 source ssh_db.sh
 
-if [ -d "$HOME/multipool/yiimp_multi" ]; then
-  cd $HOME/multipool/yiimp_multi
-else
-  cd $HOME
-fi
+cd "$HOME/multipool/yiimp_multi" || exit 1

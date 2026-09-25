@@ -1,36 +1,34 @@
 #!/usr/bin/env bash
-
 #####################################################
 # Source various web sources:
 # https://www.linuxbabe.com/ubuntu/enable-google-tcp-bbr-ubuntu
 # https://www.cyberciti.biz/faq/linux-tcp-tuning/
 # Created by cryptopool.builders for crypto use...
+#
+# Network tuning for YiiMP. Executed on the remote servers and sourced on
+# the DB server (server_harden_db.sh), so it must not call exit.
 #####################################################
 
 source /etc/functions.sh
 source /etc/multipool.conf
-source $STORAGE_ROOT/yiimp/.yiimp.conf
-
-(crontab -l 2>/dev/null; echo "@reboot source /etc/functions.sh") | crontab -
-(crontab -l 2>/dev/null; echo "@reboot source /etc/multipool.conf") | crontab -
 
 echo -e " Boosting server performance for YiiMP...$COL_RESET"
-# Boost Network Performance by Enabling TCP BBR
-hide_output sudo apt install -y --install-recommends linux-generic-hwe-16.04;
-wait $!
-echo 'net.core.default_qdisc=fq' | hide_output sudo tee -a /etc/sysctl.conf
-echo 'net.ipv4.tcp_congestion_control=bbr' | hide_output sudo tee -a /etc/sysctl.conf
-
-# Tune Network Stack
-echo 'net.core.wmem_max=12582912' | hide_output sudo tee -a /etc/sysctl.conf
-echo 'net.core.rmem_max=12582912' | hide_output sudo tee -a /etc/sysctl.conf
-echo 'net.ipv4.tcp_rmem= 10240 87380 12582912' | hide_output sudo tee -a /etc/sysctl.conf
-echo 'net.ipv4.tcp_wmem= 10240 87380 12582912' | hide_output sudo tee -a /etc/sysctl.conf
-echo 'net.ipv4.tcp_window_scaling = 1' | hide_output sudo tee -a /etc/sysctl.conf
-echo 'net.ipv4.tcp_timestamps = 1' | hide_output sudo tee -a /etc/sysctl.conf
-echo 'net.ipv4.tcp_sack = 1' | hide_output sudo tee -a /etc/sysctl.conf
-echo 'net.ipv4.tcp_no_metrics_save = 1' | hide_output sudo tee -a /etc/sysctl.conf
-echo 'net.core.netdev_max_backlog = 5000' | hide_output sudo tee -a /etc/sysctl.conf
-
+# Boost Network Performance by Enabling TCP BBR (available in every
+# supported kernel) and tune the network stack.
+sudo tee /etc/sysctl.d/90-multipool-network.conf > /dev/null <<'SYSCTL'
+# Created by the YiiMP multi server installer.
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+net.core.wmem_max = 12582912
+net.core.rmem_max = 12582912
+net.ipv4.tcp_rmem = 10240 87380 12582912
+net.ipv4.tcp_wmem = 10240 87380 12582912
+net.ipv4.tcp_window_scaling = 1
+net.ipv4.tcp_timestamps = 1
+net.ipv4.tcp_sack = 1
+net.ipv4.tcp_no_metrics_save = 1
+net.core.netdev_max_backlog = 5000
+SYSCTL
+sudo modprobe tcp_bbr 2> /dev/null || true
+sudo sysctl -q -p /etc/sysctl.d/90-multipool-network.conf || true
 echo -e "$GREEN Done...$COL_RESET"
-exit 0

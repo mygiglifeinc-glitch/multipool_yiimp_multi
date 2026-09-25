@@ -1,97 +1,52 @@
+#!/usr/bin/env bash
 #####################################################
 # Source code from https://codereview.stackexchange.com/questions/55077/small-bash-script-to-start-and-stop-named-services
 # Updated by cryptopool.builders for crypto use...
+#
+# Start/stop the YiiMP screens on the web server:
+#   screens start|stop|restart main|loop2|blocks|debug
 #####################################################
 
 source /etc/multipool.conf
-source $STORAGE_ROOT/yiimp/.prescreens.start.conf
+source "$STORAGE_ROOT/yiimp/.prescreens.start.conf"
 
-#!/bin/sh -e
-
-main="screen -dmS main ${CRONS}/main.sh"
-mainstop='screen -X -S main quit'
-loop2="screen -dmS loop2 ${CRONS}/loop2.sh"
-loop2quit='screen -X -S loop2 quit'
-blocks="screen -dmS blocks ${CRONS}/blocks.sh"
-blocksquit='screen -X -S blocks quit'
-debug="screen -dmS debug tail -f ${LOG_DIR}/debug.log"
-debugquit='screen -X -S debug quit'
-
-startstop_service() {
-    cmd=$1
-    name=$2
-    sudo service $name $cmd
+function screen_start {
+	case "$1" in
+		main | loop2 | blocks) screen -dmS "$1" bash "${CRONS}/$1.sh" ;;
+		debug) screen -dmS debug tail -f "${LOG_DIR}/debug.log" ;;
+	esac
 }
 
-startstop_main() {
-    cmd=$1
-    case $cmd in
-        stop) $mainstop ;;
-        start) $main ;;
-        restart)
-            $mainstop
-            sleep 1
-            $main
-            ;;
-    esac
+function screen_stop {
+	screen -X -S "$1" quit
 }
 
-startstop_loop2() {
-    cmd=$1
-    case $cmd in
-        stop) $loop2stop ;;
-        start) $loop2 ;;
-        restart)
-            $loop2nstop
-            sleep 1
-            $loop2
-            ;;
-    esac
+function startstop_service {
+	sudo systemctl "$1" "$2"
 }
 
-startstop_blocks() {
-    cmd=$1
-    case $cmd in
-        stop) $blocksstop ;;
-        start) $blocks ;;
-        restart)
-            $blocksstop
-            sleep 1
-            $blocks
-            ;;
-    esac
-}
-
-startstop_debug() {
-    cmd=$1
-    case $cmd in
-        stop) $debugstop ;;
-        start) $debug ;;
-        restart)
-            $debugstop
-            sleep 1
-            $debug
-            ;;
-    esac
-}
-
-
-case "$1" in
-    start|stop|restart) cmd=$1 ;;
-    *)
-        shift
-        servicenames=${@-servicenames}
-        echo "usage: $0 [start|stop|restart] $servicenames"
-        exit 1
+case "${1:-}" in
+	start | stop | restart) cmd=$1 ;;
+	*)
+		echo "usage: $0 [start|stop|restart] main|loop2|blocks|debug"
+		exit 1
+		;;
 esac
 shift
 
 for name; do
-    case "$name" in
-        main) startstop_main $cmd ;;
-        loop2) startstop_loop2 $cmd ;;
-        blocks) startstop_blocks $cmd ;;
-        debug) startstop_debug $cmd ;;
-        *) startstop_service $cmd $name ;;
-    esac
+	case "$name" in
+		main | loop2 | blocks | debug)
+			case "$cmd" in
+				start) screen_start "$name" ;;
+				stop) screen_stop "$name" ;;
+				restart)
+					screen_stop "$name"
+					sleep 1
+					screen_start "$name"
+					;;
+			esac
+			;;
+		*) startstop_service "$cmd" "$name" ;;
+	esac
 done

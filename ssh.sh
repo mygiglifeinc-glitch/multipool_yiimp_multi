@@ -1,56 +1,31 @@
 #!/usr/bin/env bash
-
 #####################################################
 # Source https://mailinabox.email/ https://github.com/mail-in-a-box/mailinabox
 # Updated by cryptopool.builders for crypto use...
+#
+# Firewall for a remote server.
+#   ssh.sh web|stratum|daemon
 #####################################################
 
-
+MP_STAGE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source /etc/functions.sh
 source /etc/multipool.conf
-source $STORAGE_ROOT/yiimp/.yiimp.conf
+source "$STORAGE_ROOT/yiimp/.yiimp.conf"
+source "$MP_STAGE/system_base.sh"
+source "$MP_STAGE/firewall.sh"
 
-
-echo -e " Initializing UFW Firewall...$COL_RESET"
-if [ -z "${DISABLE_FIREWALL:-}" ]; then
-	# Install `ufw` which provides a simple firewall configuration.
-	apt_install ufw;
-  wait $!
-
-	# Allow incoming connections to SSH.
-	ufw_allow ssh;
-  wait $!
-	ufw_allow http;
-  wait $!
-	ufw_allow https;
-  wait $!
-  ufw_allow mysql;
-  wait $!
-	# ssh might be running on an alternate port. Use sshd -T to dump sshd's #NODOC
-	# settings, find the port it is supposedly running on, and open that port #NODOC
-	# too. #NODOC
-	SSH_PORT=$(sshd -T 2>/dev/null | grep "^port " | sed "s/port //") #NODOC
-	if [ ! -z "$SSH_PORT" ]; then
-	if [ "$SSH_PORT" != "22" ]; then
-
-	echo Opening alternate SSH port $SSH_PORT. #NODOC
-	ufw_allow $SSH_PORT;
-  wait $!
-	ufw_allow http;
-  wait $!
-	ufw_allow https;
-  wait $!
-  ufw_allow mysql;
-  wait $!
-
-	fi
-	fi
-
-sudo ufw --force enable;
-wait $!
-fi #NODOC
-
-echo -e "$GREEN Done...$COL_RESET"
-
-# Installation of remote server completed.... Force rebot server...
-sudo reboot
+case "${1:-}" in
+	web)
+		mp_firewall_setup --public http --public https ;;
+	stratum)
+		# Stratum ports are opened for miners with addport or "sudo ufw allow
+		# port"; the daemon server may always reach them for blocknotify.
+		mp_firewall_setup --peer "${DaemonInternalIP:-}" ;;
+	daemon)
+		# Coin daemon RPC is only reachable from the web and stratum servers.
+		mp_firewall_setup --peer "${WebInternalIP:-}" --peer "${StratumInternalIP:-}" ;;
+	*)
+		echo "usage: $0 web|stratum|daemon"
+		exit 1 ;;
+esac
+exit 0
