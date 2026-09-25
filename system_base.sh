@@ -110,10 +110,6 @@ function mp_clone_yiimp {
 	local branch=${YiiMPBranch:-}
 	local dest="$STORAGE_ROOT/yiimp/yiimp_setup/yiimp"
 
-	if [ -z "$branch" ] && is_yes "${CoinPort:-no}"; then
-		branch=multi-port
-	fi
-
 	echo -e " Downloading YiiMP Repo...$COL_RESET"
 	sudo mkdir -p "$STORAGE_ROOT/yiimp/yiimp_setup"
 	sudo rm -rf "$dest"

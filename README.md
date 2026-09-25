@@ -31,7 +31,7 @@ option 1).
 | Variable | Default | Purpose |
 |:--|:--|:--|
 | `YIIMP_REPO` | `https://github.com/mygiglifeinc-glitch/yiimp.git` | YiiMP source repository |
-| `YIIMP_BRANCH` | repository default (`multi-port` with dedicated coin ports) | YiiMP branch or tag |
+| `YIIMP_BRANCH` | repository default | YiiMP branch or tag |
 | `DISABLE_FIREWALL` | unset | Set to `1` to skip the ufw configuration |
 
 ## Stratum servers
