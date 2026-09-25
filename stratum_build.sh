@@ -41,11 +41,6 @@ function mp_build_stratum {
 	if is_yes "${AutoExchange:-no}"; then
 		sudo sed -i 's/^CFLAGS += -DNO_EXCHANGE/#CFLAGS += -DNO_EXCHANGE/' "$src/stratum/Makefile"
 	fi
-	# Build fix for GCC 11 and newer ("size of array element is not a
-	# multiple of its alignment"): align the struct itself instead of the
-	# typedef. Does nothing if the source is already fixed.
-	sudo sed -i 's/^ALIGN( *64 *) typedef struct __blake2s_state/typedef struct ALIGN( 64 ) __blake2s_state/' \
-		"$src/stratum/sha3/blake2s.h"
 	hide_output sudo make -C "$src/stratum"
 	echo -e "$GREEN Done...$COL_RESET"
 
