@@ -41,11 +41,11 @@ fi
 
 echo -e " Installing YiiMP Required system packages...$COL_RESET"
 php_packages=()
-for ext in fpm opcache common gd mysql cli curl intl xml xsl zip mbstring; do
+for ext in fpm common gd mysql cli curl intl xml xsl zip mbstring bcmath; do
 	php_packages+=("php${PHP_VERSION}-${ext}")
 done
 # Extensions that are not built for every PHP version / release.
-for ext in imap pspell sqlite3 tidy memcache imagick; do
+for ext in opcache imap pspell sqlite3 tidy memcache imagick; do
 	if apt-cache show "php${PHP_VERSION}-${ext}" > /dev/null 2>&1; then
 		php_packages+=("php${PHP_VERSION}-${ext}")
 	fi
