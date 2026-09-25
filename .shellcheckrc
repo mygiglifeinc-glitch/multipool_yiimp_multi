@@ -1,0 +1,4 @@
+external-sources=true
+# Scripts source /etc/functions.sh, /etc/multipool.conf and generated config
+# files that only exist on an installed system.
+disable=SC1090,SC1091
